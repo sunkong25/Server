@@ -260,3 +260,191 @@ class BlogApiControllerTest {
 - MockMvc를 사용해서 HTTP 메서드, URL, 요청 본문, 요청 타입 등을 설정한 뒤 설정한 내용을 바탕으로 요청함
 - contentType() 메서드는 요청을 보낼 때 JSON, XML 등 다양한 타입 중 하나를 골라 요청 보냄
 - assertThat() 메서드로는 블로그 글의 개수가 1인지 확인
+
+## 블로그 글 조회 API 구현
+
+### 글 목록 조회 API
+
+```java
+/* BlogService.java */
+
+@RequiredArgsConstructor
+@Service
+public class BlogService {
+    
+    private final BlogRepository blogRepository;
+
+		... 생략 ...
+
+		public List<Article> findAll() {
+				return blogRepository.findAll();
+		}
+}
+```
+
+- JPA 지원 메서드인 findAll()을 호출해 article 테이블에 저장되어 있는 모든 데이터를 조회
+
+```java
+/* ArticleResponse.java */
+
+@Getter
+public class ArticleResponse {
+
+    private final String title;
+    private final String content;
+
+    public ArticleResponse(Article article){
+        this.title = article.getTitle();
+        this.content = article.getContent();
+    }
+}
+```
+
+- 응답을 위한 DTO
+- 글은 제목과 내용으로 구성되어 있으므로 해당 필드를 가지는 클래스 구현
+- 엔티티를 인수로 받는 생성자를 추가
+
+```java
+/* BlogApiController.java */
+
+@RequiredArgsConstructor
+@RestController // HTTP Response Body에 객체 데이터를 JSON 형식으로 반환하는 컨트롤러
+public class BlogApiController {
+
+    private final BlogService blogService;
+    
+    ... 생략 ...
+		
+		@GetMapping("/api/articles")
+    public ResponseEntity<List<ArticleResponse>> findAllArticles() {
+        List<ArticleResponse> articles = blogService.findAll()
+                .stream()
+                .map(ArticleResponse::new)
+                .toList();
+        return ResponseEntity.ok()
+                .body(articles);
+    }
+}
+```
+
+- /api/articles GET 요청이 오면 글 목록을 조회할 findAllArticles() 메서드
+⇒ 전체 글 목록을 조회하고 응답하는 역할
+- 요청이 오면 글 전체를 조회하는 findAll() 메서드를 호출한 다음 응답용 객체인 ArticleResponse로 파싱해 body에 담아 클라이언트에 전송
+
+```java
+/* BlogApiControllerTest.java */
+
+@SpringBootTest
+@AutoConfigureMockMvc
+class BlogApiControllerTest {
+
+		... 생략 ...
+
+		@DisplayName("findAllArticles: 블로그 글 목록 조회에 성공한다.")
+    @Test
+    public void findAllArticles() throws Exception {
+        //given
+        final String url = "/api/articles";
+        final String title = "title";
+        final String content = "content";
+
+        blogRepository.save(Article.builder()
+                .title(title)
+                .content(content)
+                .build());
+
+        //when
+        final ResultActions resultActions = mockMvc.perform(get(url)
+                .accept(MediaType.APPLICATION_JSON_VALUE));
+
+        //then
+        resultActions
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].content").value(content))
+                .andExpect(jsonPath("$[0].title").value(title));
+    }
+
+```
+
+### 글 상세조회 API
+
+```java
+/* BlogService.java */
+
+@RequiredArgsConstructor
+@Service
+public class BlogService {
+
+		... 생략 ...
+		
+		public Article findById(long id) {
+        return blogRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("not found: " + id));
+    }
+}
+```
+
+- 글의 ID를 이용해 글을 조회
+- findById() 메서드는 JPA에서 제공하는 메서드를 사용해 ID를 받아 엔티티 조회
+- 조회해서 값이 없으면 IllegalArgumentException 예외 발생
+
+```java
+/* BlogApiController.java */
+
+@RequiredArgsConstructor
+@RestController
+public class BlogApiController {
+	
+		... 생략 ...
+	
+		@GetMapping("/api/articles/{id}")
+		// URL 경로에서 값 추출
+    public ResponseEntity<ArticleResponse> findArticles(@PathVariable long id) {
+        Article article = blogService.findById(id);
+        return ResponseEntity.ok()
+                .body(new ArticleResponse(article));
+    }
+}
+```
+
+- /api/articles/{id} GET 요청이 오면 블로그 글을 조회하기 위해 매핑할 findArticle() 메서드
+- @PathVariable 애너테이션은 URL에서 값을 가져오는 애너테이션
+⇒ /api/articles/3 GET 요청을 받으면 id에 3이 들어옴
+- id 값은 서비스 클래스의 findById() 메서드로 넘어가 3번 블로그 글을 찾음
+- 글을 찾으면 3번 글의 정보를 body에 담아 웹 브라우저로 전송
+
+```java
+/* BlogApiControllerTest */
+
+@SpringBootTest
+@AutoConfigureMockMvc
+class BlogApiControllerTest {
+		
+		... 생략 ...
+
+    @DisplayName("findArticle: 블로그 글 조회에 성공한다.")
+    @Test
+    public void findArticle() throws Exception {
+        //given
+        final String url = "/api/articles/{id}";
+        final String title = "title";
+        final String content = "content";
+
+        Article savedArticle = blogRepository.save(Article.builder()
+                .title(title)
+                .content(content)
+                .build());
+
+        //when
+        final ResultActions resultActions = mockMvc.perform(get(url, savedArticle.getId()));
+
+        //then
+        resultActions
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").value(content))
+                .andExpect(jsonPath("$.title").value(title));
+    }
+}
+```
+
+- 글 조회 API는 제목과 글 내용을 가져옴
