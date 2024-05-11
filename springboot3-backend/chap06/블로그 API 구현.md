@@ -448,3 +448,214 @@ class BlogApiControllerTest {
 ```
 
 - 글 조회 API는 제목과 글 내용을 가져옴
+
+## 블로그 글 삭제 API 구현
+
+- ID에 해당하는 블로그 글 삭제 API
+
+```java
+/* BlogService.java */
+
+@RequiredArgsConstructor
+@Service
+public class BlogService {
+
+		... 생략 ...
+		
+	public void delete(long id) {
+        blogRepository.deleteById(id);
+	}
+}
+```
+
+- delete()메서드는 블로그 글의 ID를 받은 뒤 JPA에서 제공하는 deleteById() 메서드를 이용해 데이터베이스에서 데이터 삭제
+
+```java
+/* BlogApiController.java */
+
+@RequiredArgsConstructor
+@RestController
+public class BlogApiController {
+
+		... 생략 ...
+		
+    @DeleteMapping("/api/articles/{id}")
+    public ResponseEntity<Void> deleteArticle(@PathVariable long id) {
+        blogService.delete(id);
+        return ResponseEntity.ok()
+                .build();
+    }
+}
+```
+
+- /api/articles/{id} DELETE 요청이 오면 글을 삭제하기 위한 deleteArticle() 메서드 사용
+- 요청이 오면 {id}에 해당하는 값이 @PathVariable 애너테이션을 통해 들어옴
+
+### 글 삭제 API 실행 테스트
+
+```java
+/* BlogApiControllerTest.java */
+
+@SpringBootTest
+@AutoConfigureMockMvc
+class BlogApiControllerTest {
+
+		... 생략 ...    
+    
+    @DisplayName("deleteArticle: 블로그 글 삭제에 성공한다.")
+    @Test
+    public void deleteArticle() throws Exception {
+        //given
+        final String url = "/api/articles/{id}";
+        final String title = "title";
+        final String content = "content";
+
+        Article savedArticle = blogRepository.save(Article.builder()
+                .title(title)
+                .content(content)
+                .build());
+
+        //when
+        mockMvc.perform(delete(url, savedArticle.getId()))
+                .andExpect(status().isOk());
+
+        //then
+        List<Article> articles = blogRepository.findAll();
+
+        assertThat(articles).isEmpty();
+    }
+}
+```
+
+## 블로그 글 수정 API 구현
+
+- update() 메서드는 특정 아이디의 글을 수정
+
+```java
+/* Article.java */
+
+@Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Article {
+
+		... 생략 ...
+		
+    public void update(String title, String content) {
+        this.title = title;
+        this.content = content;
+    }
+}
+```
+
+```java
+/* UpdateArticleRequest.java */
+
+@NoArgsConstructor
+@AllArgsConstructor
+@Getter
+public class UpdateArticleRequest {
+    private String title;
+    private String content;
+}
+```
+
+- 블로그 글 수정 요청을 받을 DTO 작성
+- 글 수정 부분은 제목과 내용이므로 이에 맞게 제목과 내용 필드로 구성
+
+```java
+/* BlogService.java */
+
+@RequiredArgsConstructor
+@Service
+public class BlogService {
+
+... 생략 ...
+
+@Transactional
+    public Article update(long id, UpdateArticleRequest request) {
+        Article article = blogRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("not found: " + id));
+        article.update(request.getTitle(), request.getContent());
+        return article;
+    }
+}
+```
+
+- 글을 수정하는 update() 메서드
+- @Transactional 애너테이션은 매칭한 메서드를 하나의 트랜잭션으로 묶음
+- 스프링에서는 트랜잭션을 적용하기 위해 다른 작업 필요없이 @Transactional만 적용
+- update() 메서드는 엔티티의 필드 값이 바뀌면 중간에 에러가 발생해도 제대로 된 값 수정을 보장
+- 트랜젝션
+    - 데이터베이스의 데이터를 바꾸기 위해 묶은 작업 단위
+    - 작업 단위 안에서 중간에 실패해도 트랜잭션의 처음 상태로 모두 돌릴 수 있음
+
+```java
+/* BlogApiController.java */
+
+@RequiredArgsConstructor
+@RestController
+public class BlogApiController {
+
+		... 생략 ...
+		
+    @PutMapping("/api/articles/{id}")
+    public ResponseEntity<Article> updateArticle(@PathVariable long id,
+                                                 @RequestBody UpdateArticleRequest request) {
+        Article updatedArticle = blogService.update(id, request);
+
+        return ResponseEntity.ok()
+                .body(updatedArticle);
+    }
+}
+```
+
+- /api/articles/{id} PUT 요청이 오면 글을 수정하기 위한 updateArticle() 메서드 사용
+- 요청이 오면 Request Body 정보가 request로 넘어옴
+- update() 메서드에 id와 request 넘겨줌
+- 해당 응답은 body에 담아 전달
+
+### 글 수정 API 실행 테스트
+
+```java
+/* BlogApiControllerTest.java */
+    
+@SpringBootTest
+@AutoConfigureMockMvc
+class BlogApiControllerTest {
+    
+    ... 생략 ...
+    
+    @DisplayName("updateArticle: 블로그 글 수정에 성공한다.")
+    @Test
+    public void updateArticle() throws Exception {
+        //given
+        final String url="/api/articles/{id}";
+        final String title = "title";
+        final String content = "content";
+
+        Article savedArticle = blogRepository.save(Article.builder()
+                .title(title)
+                .content(content)
+                .build());
+
+        final String newTitle = "new title";
+        final String newContent = "new content";
+
+        UpdateArticleRequest request = new UpdateArticleRequest(newTitle, newContent);
+
+        //when
+        ResultActions result = mockMvc.perform(put(url, savedArticle.getId())
+                .contentType(MediaType.APPLICATION_JSON_VALUE)
+                .content(objectMapper.writeValueAsString(request)));
+
+        //then
+        result.andExpect(status().isOk());
+
+        Article article = blogRepository.findById(savedArticle.getId()).get();
+
+        assertThat(article.getTitle()).isEqualTo(newTitle);
+        assertThat(article.getContent()).isEqualTo(newContent);
+    }
+}
+```
